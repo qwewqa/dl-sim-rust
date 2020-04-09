@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-// type Callback = fn();
+type Callback = fn();
 
 #[derive(PartialEq, Debug)]
 struct Trigger {
     time: f64,
-    // callback: Callback,
+    callback: Callback,
 }
 
 impl Eq for Trigger {} // why tho
@@ -35,16 +35,16 @@ impl Timeline {
         }
     }
 
-    pub fn schedule(&mut self, time: f64) {
-        self.heap.push(Trigger { time: time })
+    pub fn schedule(&mut self, time: f64, callback: Callback) {
+        self.heap.push(Trigger { time, callback });
     }
 
     pub fn next(&mut self) {
         let next = self.heap.pop();
         println!("exec={:?}", next);
-        match next {
-            Some(n) => self.now = n.time,
-            None => (),
+        if let Some(n) = next {
+            self.now = n.time;
+            (n.callback)();
         }
     }
 
