@@ -12,6 +12,7 @@ pub fn new_rc_ref_cell_box<T>(x: T) -> RcRefCellBox<T> {
 
 pub struct Timeline {
     time: Cell<f64>,
+    running: Cell<bool>,
     queue: RefCell<BinaryHeap<Rc<Trigger>>>,
 }
 
@@ -19,6 +20,7 @@ impl Timeline {
     pub fn new() -> Timeline {
         Timeline {
             time: Cell::new(0.0),
+            running: Cell::new(false),
             queue: RefCell::new(BinaryHeap::new()),
         }
     }
@@ -34,7 +36,9 @@ impl Timeline {
     }
 
     pub fn run(&self) {
-        loop {
+        if self.running.get() { panic!() }
+        self.running.set(true);
+        while self.running.get() {
             let next = self.queue.borrow_mut().pop();
             if next.is_none() { break; }
             let next = next.unwrap();
@@ -42,6 +46,14 @@ impl Timeline {
             self.time.set(next.time);
             (&mut *next.action.borrow_mut())();
         }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running.get()
+    }
+
+    pub fn stop(&self) {
+        self.running.set(false);
     }
 
     pub fn now(&self) -> f64 {
@@ -169,6 +181,40 @@ mod tests {
         });
         tl.run();
         assert_eq!(c.counter.get(), 3);
+    }
+
+    #[test]
+    fn stopping() {
+        struct Context {
+            timeline: Timeline,
+            counter: Cell<i32>,
+        }
+        let c = Rc::new(Context {
+            timeline: Timeline::new(),
+            counter: Cell::new(0),
+        });
+
+        let tl = &c.timeline;
+        let r = Rc::downgrade(&c.clone());
+        tl.schedule(1.0, move || {
+            let r = r.upgrade().unwrap();
+            assert_eq!(r.timeline.now(), 1.0);
+            assert_eq!(r.counter.get(), 0);
+            r.counter.replace(1);
+        });
+        let r = Rc::downgrade(&c.clone());
+        tl.schedule(2.0, move || {
+            let r = r.upgrade().unwrap();
+            assert_eq!(r.timeline.now(), 2.0);
+            assert_eq!(r.counter.get(), 1);
+            r.counter.replace(2);
+            r.timeline.stop();
+        });
+        tl.schedule(3.0, move || {
+            panic!()
+        });
+        tl.run();
+        assert_eq!(c.counter.get(), 2);
     }
 
     #[test]
