@@ -33,13 +33,15 @@ impl Timeline {
         Rc::downgrade(&r)
     }
 
-    pub fn run(&self) -> Result<(), ()> {
-        while let Some(next) = self.queue.borrow_mut().pop() {
+    pub fn run(&self) {
+        loop {
+            let next = self.queue.borrow_mut().pop();
+            if next.is_none() { break; }
+            let next = next.unwrap();
             if next.cancelled.get() { continue; };
             self.time.set(next.time);
             (&mut *next.action.borrow_mut())();
         }
-        Ok(())
     }
 
     pub fn now(&self) -> f64 {
@@ -130,5 +132,72 @@ mod tests {
         trigger.upgrade().unwrap().cancel();
         tl.run();
         assert!(!c.flag.get());
+    }
+
+    #[test]
+    fn ordering() {
+        struct Context {
+            timeline: Timeline,
+            counter: Cell<i32>,
+        }
+        let c = Rc::new(Context {
+            timeline: Timeline::new(),
+            counter: Cell::new(0),
+        });
+
+        let tl = &c.timeline;
+        let r = Rc::downgrade(&c.clone());
+        tl.schedule(3.0, move || {
+            let r = r.upgrade().unwrap();
+            assert_eq!(r.timeline.now(), 3.0);
+            assert_eq!(r.counter.get(), 2);
+            r.counter.replace(3);
+        });
+        let r = Rc::downgrade(&c.clone());
+        tl.schedule(1.0, move || {
+            let r = r.upgrade().unwrap();
+            assert_eq!(r.timeline.now(), 1.0);
+            assert_eq!(r.counter.get(), 0);
+            r.counter.replace(1);
+        });
+        let r = Rc::downgrade(&c.clone());
+        tl.schedule(2.0, move || {
+            let r = r.upgrade().unwrap();
+            assert_eq!(r.timeline.now(), 2.0);
+            assert_eq!(r.counter.get(), 1);
+            r.counter.replace(2);
+        });
+        tl.run();
+        assert_eq!(c.counter.get(), 3);
+    }
+
+    #[test]
+    fn nested_schedule() {
+        struct Context {
+            timeline: Timeline,
+            counter: Cell<i32>,
+        }
+        let c = Rc::new(Context {
+            timeline: Timeline::new(),
+            counter: Cell::new(0),
+        });
+
+        let tl = &c.timeline;
+        let r = Rc::downgrade(&c.clone());
+        tl.schedule(1.0, move || {
+            let r = r.upgrade().unwrap();
+            assert_eq!(r.timeline.now(), 1.0);
+            assert_eq!(r.counter.get(), 0);
+            r.counter.replace(1);
+            let ir = Rc::downgrade(&r.clone());
+            r.timeline.schedule(1.0, move || {
+                let ir = ir.upgrade().unwrap();
+                assert_eq!(ir.timeline.now(), 2.0);
+                assert_eq!(ir.counter.get(), 1);
+                ir.counter.replace(2);
+            });
+        });
+        tl.run();
+        assert_eq!(c.counter.get(), 2);
     }
 }
