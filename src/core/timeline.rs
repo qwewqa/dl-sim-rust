@@ -3,7 +3,6 @@ use std::collections::BinaryHeap;
 use std::cell::{RefCell, Cell};
 use std::rc::{Rc, Weak};
 use std::any::Any;
-use bumpalo::Bump;
 
 pub struct Timeline<T> {
     time: f64,
@@ -153,5 +152,43 @@ mod tests {
         assert_eq!(n.time, 3.0);
         assert_eq!(n.value, 3.0);
         assert!(tl.next().is_none())
+    }
+
+    #[test]
+    fn closures_in_timeline() {
+        struct Foo {
+            x: i32,
+            timeline: Timeline<Box<dyn Fn(&mut Foo)>>,
+        }
+        impl Foo {
+            fn new() -> Foo {
+                Foo {
+                    x: 0,
+                    timeline: Timeline::new()
+                }
+            }
+
+            fn f(&mut self) {
+                self.x += 1;
+                if self.x < 10 {
+                    self.schedule(1.0, Foo::f);
+                }
+            }
+
+            fn schedule(&mut self, delay: f64, action: impl Fn(&mut Foo) + 'static) {
+                self.timeline.schedule(delay, Box::new(action));
+            }
+
+            fn run(&mut self) {
+                self.schedule(1.0, Foo::f);
+                while let Some(next) = self.timeline.next() {
+                    (next.value)(self);
+                }
+            }
+        }
+        let mut foo = Foo::new();
+        foo.run();
+        assert_eq!(foo.x, 10);
+        assert_eq!(foo.timeline.time, 10.0);
     }
 }
